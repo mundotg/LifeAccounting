@@ -1,0 +1,33 @@
+// Prisma Schema File
+// Saiba mais: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model Transaction {
+  id          Int      @id @default(autoincrement())
+  type        TransactionType
+  amount      Decimal  // Usar Decimal para evitar problemas com precisão em valores financeiros
+  description String
+  moeda       CurrencyType
+  createdAt   DateTime @default(now())
+}
+
+// 🔹 Enum para garantir que 'type' tenha apenas valores válidos
+enum TransactionType {
+  ENTRADA
+  SAIDA
+}
+
+// 🔹 Enum para garantir que 'moeda' tenha apenas moedas suportadas
+enum CurrencyType {
+  USD
+  AOA
+  EUR
+}

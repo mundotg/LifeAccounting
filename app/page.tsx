@@ -1,103 +1,311 @@
-import Image from "next/image";
+"use client";
+import { useState, useEffect } from "react";
+import axios from "axios";
+import { CurrencyType, TransactionType } from "@prisma/client";
+import { ExchangeRates, TransactionT } from "@/type";
+import { TransactionModal } from "@/component/modalVisualizar";
+import { date } from "zod";
+
+
+interface FormState {
+  type: TransactionType;
+  amount: string;
+  description: string;
+  moeda: CurrencyType;
+}
+
 
 export default function Home() {
-  return (
-    <div className="grid grid-rows-[20px_1fr_20px] items-center justify-items-center min-h-screen p-8 pb-20 gap-16 sm:p-20 font-[family-name:var(--font-geist-sans)]">
-      <main className="flex flex-col gap-[32px] row-start-2 items-center sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={180}
-          height={38}
-          priority
-        />
-        <ol className="list-inside list-decimal text-sm/6 text-center sm:text-left font-[family-name:var(--font-geist-mono)]">
-          <li className="mb-2 tracking-[-.01em]">
-            Get started by editing{" "}
-            <code className="bg-black/[.05] dark:bg-white/[.06] px-1 py-0.5 rounded font-[family-name:var(--font-geist-mono)] font-semibold">
-              app/page.tsx
-            </code>
-            .
-          </li>
-          <li className="tracking-[-.01em]">
-            Save and see your changes instantly.
-          </li>
-        </ol>
+  const [transactions, setTransactions] = useState<TransactionT[]>([]);
+  const [balance, setBalance] = useState<{ [key: string]: number }>({ USD: 0, AOA: 0, EUR: 0 });
+  const [form, setForm] = useState<FormState>({
+    type: TransactionType.ENTRADA,
+    amount: "",
+    description: "",
+    moeda: CurrencyType.AOA,
+  });
+  const [displayCurrency, setDisplayCurrency] = useState<CurrencyType>("USD");
+  const [isLoading, setIsLoading] = useState(true);
+  const [showForm, setShowForm] = useState(false);
+  const [selectedTransaction, setSelectedTransaction] = useState<TransactionT | null>(null);
+  const [isModalOpen, setIsModalOpen] = useState(false);
 
-        <div className="flex gap-4 items-center flex-col sm:flex-row">
-          <a
-            className="rounded-full border border-solid border-transparent transition-colors flex items-center justify-center bg-foreground text-background gap-2 hover:bg-[#383838] dark:hover:bg-[#ccc] font-medium text-sm sm:text-base h-10 sm:h-12 px-4 sm:px-5 sm:w-auto"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
+  // Taxas de câmbio de exemplo (em situação real, você usaria uma API)
+  const exchangeRates: ExchangeRates = {
+    USD: { AOA: 830, EUR: 0.92 },
+    AOA: { USD: 0.0012, EUR: 0.0011 },
+    EUR: { USD: 1.09, AOA: 900 },
+  };
+
+
+
+  useEffect(() => {
+    fetchTransactions();
+  }, [isLoading]);
+
+  useEffect(() => {
+    const calculateBalance = () => {
+      const newBalance: { [key: string]: number } = { USD: 0, AOA: 0, EUR: 0 };
+      transactions.forEach(({ type, amount, moeda }) => {
+        newBalance[moeda] += type === TransactionType.ENTRADA ? parseFloat(amount) : -parseFloat(amount);
+
+      });
+      setBalance(newBalance);
+    };
+    calculateBalance();
+  }, [transactions]);
+
+  const fetchTransactions = async () => {
+    if (!isLoading) return;
+
+    try {
+      const { data } = await axios.get("/api/transactions");
+
+      const datatipo = data.data as TransactionT[];
+      console.log("Transações encontradas:", datatipo);
+      setTransactions(datatipo);
+      //setTransactions(data);
+    } catch (error) {
+      console.error("Erro ao buscar transações", error);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    try {
+      const newTransaction: Omit<TransactionT, "id" | "createdAt"> = {
+        type: form.type,
+        amount: form.amount, // Convertendo corretamente para Decimal
+        description: form.description,
+        moeda: form.moeda,
+      };
+      await axios.post("/api/transactions", newTransaction, {
+        headers: { "Content-Type": "application/json" },
+      });
+      setIsLoading(true);
+      setForm({ type: TransactionType.ENTRADA, amount: "0", description: "", moeda: "USD" });
+      setShowForm(false);
+    } catch (error) {
+      console.error("Erro ao adicionar transação", error);
+    }
+  };
+
+  const convertCurrency = (amount: number, from: string, to: string): number => {
+    if (from === to) return amount;
+    return amount * exchangeRates[from as keyof ExchangeRates][to as keyof ExchangeRates[keyof ExchangeRates]];
+  };
+
+  const getTotalBalanceInCurrency = (currency: CurrencyType): number => {
+    return Object.entries(balance).reduce((total, [curr, value]) => {
+      return total + convertCurrency(value, curr, currency);
+    }, 0);
+  };
+
+  const openTransactionModal = (transaction: TransactionT) => {
+    // Convertendo Transaction para TransactionT (com amount como string)
+    setSelectedTransaction(transaction);
+    setIsModalOpen(true);
+  };
+
+  const closeModal = () => {
+    setIsModalOpen(false);
+    setSelectedTransaction(null);
+  };
+
+  const formatCurrency = (value: number, currency: string): string => {
+    const formatter = new Intl.NumberFormat(undefined, {
+      style: 'currency',
+      currency: currency,
+      minimumFractionDigits: 2,
+    });
+    return formatter.format(value);
+  };
+  const balancecard = () => {
+
+    return <div className="bg-white rounded-lg shadow-md p-4 sm:p-6 mb-6">
+      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-4 gap-2">
+        <h2 className="text-lg font-semibold text-gray-800">Saldo Total:</h2>
+        <div className="flex items-center gap-2 w-full sm:w-auto">
+          <span className="text-sm text-gray-500 mr-1 hidden sm:inline">Mostrar em:</span>
+          <select
+            value={displayCurrency}
+            onChange={(e) => setDisplayCurrency(e.target.value as CurrencyType)}
+            className="border rounded p-1 text-sm w-full sm:w-auto"
           >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={20}
-              height={20}
-            />
-            Deploy now
-          </a>
-          <a
-            className="rounded-full border border-solid border-black/[.08] dark:border-white/[.145] transition-colors flex items-center justify-center hover:bg-[#f2f2f2] dark:hover:bg-[#1a1a1a] hover:border-transparent font-medium text-sm sm:text-base h-10 sm:h-12 px-4 sm:px-5 w-full sm:w-auto md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Read our docs
-          </a>
+            <option value={CurrencyType.USD}>USD</option>
+            <option value={CurrencyType.AOA}>AOA</option>
+            <option value={CurrencyType.EUR}>EUR</option>
+          </select>
         </div>
-      </main>
-      <footer className="row-start-3 flex gap-[24px] flex-wrap items-center justify-center">
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/file.svg"
-            alt="File icon"
-            width={16}
-            height={16}
-          />
-          Learn
-        </a>
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/window.svg"
-            alt="Window icon"
-            width={16}
-            height={16}
-          />
-          Examples
-        </a>
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://nextjs.org?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/globe.svg"
-            alt="Globe icon"
-            width={16}
-            height={16}
-          />
-          Go to nextjs.org →
-        </a>
-      </footer>
+      </div>
+
+      <div className="text-xl sm:text-2xl font-bold text-center mb-4">
+        {formatCurrency(getTotalBalanceInCurrency(displayCurrency), displayCurrency)}
+      </div>
+
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+        {Object.entries(balance).map(([currency, value]) => (
+          <div key={currency} className="bg-gray-100 p-2 rounded flex sm:block justify-between items-center">
+            <div className="text-sm sm:text-xs text-gray-500">{currency}</div>
+            <div className="font-semibold text-right sm:text-center">
+              {currency === displayCurrency
+                ? formatCurrency(value, currency)
+                : `${formatCurrency(value, currency)}`}
+            </div>
+            {currency !== displayCurrency && (
+              <div className="text-xs text-gray-500 hidden sm:block sm:text-center">
+                {formatCurrency(convertCurrency(value, currency, displayCurrency), displayCurrency)}
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
+    </div>
+  }
+
+  const getBadgeColor = (type: TransactionType) => {
+    return type === TransactionType.ENTRADA ? "bg-green-500 text-white" : "bg-red-500 text-white";
+  };
+
+  return (
+    <div className="min-h-screen bg-gray-50">
+      <div className="container mx-auto p-4 max-w-xl">
+        <header className="bg-white rounded-lg shadow-md p-4 mb-4">
+          <h1 className="text-2xl font-bold text-center text-gray-800">Controle Financeiro</h1>
+        </header>
+
+        {/* Balance Card */}
+        {balancecard()}
+       
+
+        {/* Transaction Form Button */}
+        <div className="flex justify-center mb-4">
+          <button
+            onClick={() => setShowForm(!showForm)}
+            className="bg-blue-500 text-white py-2 px-4 rounded-full shadow-md hover:bg-blue-600 transition-colors flex items-center"
+          >
+            <span className="mr-2">{showForm ? "Cancelar" : "Nova Transação"}</span>
+            <span>{showForm ? "✕" : "+"}</span>
+          </button>
+        </div>
+
+        {/* Transaction Form */}
+        {showForm && (
+          <div className="bg-white rounded-lg shadow-md p-4 mb-6">
+            <h2 className="text-center font-semibold mb-4">Adicionar Transação</h2>
+            <form onSubmit={handleSubmit} className="flex flex-col gap-3">
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Tipo</label>
+                  <select
+                    value={form.type}
+                    onChange={(e) => setForm({ ...form, type: e.target.value as TransactionType })}
+                    className="border p-2 rounded w-full"
+                  >
+                    <option value={TransactionType.ENTRADA}>Entrada</option>
+                    <option value={TransactionType.SAIDA}>Saída</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Moeda</label>
+                  <select
+                    value={form.moeda}
+                    onChange={(e) => setForm({ ...form, moeda: e.target.value as CurrencyType })}
+                    className="border p-2 rounded w-full"
+                  >
+                    <option value={CurrencyType.USD}>Dólar (USD)</option>
+                    <option value={CurrencyType.AOA}>Kwanza (AOA)</option>
+                    <option value={CurrencyType.USD}>Euro (EUR)</option>
+                  </select>
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Valor</label>
+                <input
+                  type="number"
+                  value={form.amount}
+                  onChange={(e) => setForm({ ...form, amount: e.target.value })}
+                  placeholder="0.00"
+                  className="border p-2 rounded w-full"
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Descrição</label>
+                <input
+                  type="text"
+                  value={form.description}
+                  onChange={(e) => setForm({ ...form, description: e.target.value })}
+                  placeholder="Ex: Pagamento de salário"
+                  className="border p-2 rounded w-full"
+                />
+              </div>
+
+              <button type="submit" className="bg-blue-500 text-white p-2 rounded hover:bg-blue-600 mt-2">
+                Salvar Transação
+              </button>
+            </form>
+          </div>
+        )}
+
+        {/* Transactions List */}
+        <div className="bg-white rounded-lg shadow-md p-4">
+          <h2 className="text-lg font-semibold mb-4">Transações Recentes</h2>
+
+          {isLoading ? (
+            <div className="text-center py-4">Carregando...</div>
+          ) : transactions.length === 0 ? (
+            <div className="text-center py-4 text-gray-500">Nenhuma transação encontrada.</div>
+          ) : (
+            <ul className="space-y-3">
+            {transactions.map((t) => (
+              <li
+                key={t.id}
+                onClick={() => openTransactionModal(t)}
+                className="p-3 rounded-lg border border-gray-200 hover:bg-gray-50 cursor-pointer transition-colors"
+              >
+                <div className="flex flex-col sm:flex-row justify-between sm:items-start gap-2">
+                  <div className="flex-1 min-w-0">
+                    <div className="font-semibold truncate">{t.description}</div>
+                    <div className="text-sm text-gray-500 flex items-center gap-2">
+                      <span>{new Date(t.createdAt).toLocaleDateString()}</span>
+                      <span className={`px-2 py-0.5 rounded-full text-xs ${getBadgeColor(t.type)} inline-block sm:hidden`}>
+                        {t.type}
+                      </span>
+                    </div>
+                  </div>
+                  <div className="text-right flex items-center justify-between sm:block w-full sm:w-auto">
+                    <div className="font-bold whitespace-nowrap">
+                      {t.type === TransactionType.SAIDA ? "-" : "+"}
+                      {formatCurrency(parseFloat(t.amount), t.moeda)}
+                    </div>
+                    {t.moeda !== displayCurrency && (
+                      <div className="text-xs text-gray-500 whitespace-nowrap">
+                        {formatCurrency(convertCurrency(parseFloat(t.amount), t.moeda, displayCurrency), displayCurrency)}
+                      </div>
+                    )}
+                  </div>
+                </div>
+                <div className="mt-2 hidden sm:flex justify-between items-center">
+                  <span className={`px-2 py-1 rounded-full text-xs ${getBadgeColor(t.type)}`}>
+                    {t.type}
+                  </span>
+                </div>
+              </li>
+            ))}
+          </ul>
+          )}
+        </div>
+        <TransactionModal
+          transaction={selectedTransaction}
+          isOpen={isModalOpen}
+          onClose={closeModal}
+          exchangeRates={exchangeRates}
+        />
+      </div>
     </div>
   );
 }
