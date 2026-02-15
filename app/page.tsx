@@ -1,10 +1,9 @@
 "use client";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import axios from "axios";
 import { CurrencyType, TransactionType } from "@prisma/client";
 import { ExchangeRates, TransactionT } from "@/type";
 import { TransactionModal } from "@/component/modalVisualizar";
-import { date } from "zod";
 
 
 interface FormState {
@@ -30,6 +29,8 @@ export default function Home() {
   const [selectedTransaction, setSelectedTransaction] = useState<TransactionT | null>(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
 
+  const needsKeywords = ["renda", "salario", "salário", "aluguel", "agua", "água", "energia", "internet", "saude", "saúde", "comida", "transporte", "escola", "farmacia", "farmácia"];
+
   // Taxas de câmbio de exemplo (em situação real, você usaria uma API)
   const exchangeRates: ExchangeRates = {
     USD: { AOA: 830, EUR: 0.92 },
@@ -39,9 +40,24 @@ export default function Home() {
 
 
 
+  const fetchTransactions = useCallback(async () => {
+    if (!isLoading) return;
+
+    try {
+      const { data } = await axios.get("/api/transactions");
+      const datatipo = (data.data ?? []) as TransactionT[];
+      console.log("Transações encontradas:", datatipo);
+      setTransactions(datatipo);
+    } catch (error) {
+      console.error("Erro ao buscar transações", error);
+    } finally {
+      setIsLoading(false);
+    }
+  }, [isLoading]);
+
   useEffect(() => {
     fetchTransactions();
-  }, [isLoading]);
+  }, [fetchTransactions]);
 
   useEffect(() => {
     const calculateBalance = () => {
@@ -54,23 +70,6 @@ export default function Home() {
     };
     calculateBalance();
   }, [transactions]);
-
-  const fetchTransactions = async () => {
-    if (!isLoading) return;
-
-    try {
-      const { data } = await axios.get("/api/transactions");
-
-      const datatipo = data.data as TransactionT[];
-      console.log("Transações encontradas:", datatipo);
-      setTransactions(datatipo);
-      //setTransactions(data);
-    } catch (error) {
-      console.error("Erro ao buscar transações", error);
-    } finally {
-      setIsLoading(false);
-    }
-  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -85,7 +84,7 @@ export default function Home() {
         headers: { "Content-Type": "application/json" },
       });
       setIsLoading(true);
-      setForm({ type: TransactionType.ENTRADA, amount: "0", description: "", moeda: "USD" });
+      setForm({ type: TransactionType.ENTRADA, amount: "", description: "", moeda: CurrencyType.USD });
       setShowForm(false);
     } catch (error) {
       console.error("Erro ao adicionar transação", error);
@@ -169,6 +168,30 @@ export default function Home() {
     return type === TransactionType.ENTRADA ? "bg-green-500 text-white" : "bg-red-500 text-white";
   };
 
+  const monthlyTransactions = transactions.filter((item) => {
+    const now = new Date();
+    const createdAt = new Date(item.createdAt);
+    return createdAt.getMonth() === now.getMonth() && createdAt.getFullYear() === now.getFullYear();
+  });
+
+  const monthlyIncome = monthlyTransactions
+    .filter((item) => item.type === TransactionType.ENTRADA)
+    .reduce((sum, item) => sum + convertCurrency(parseFloat(item.amount), item.moeda, displayCurrency), 0);
+
+  const monthlyOutcome = monthlyTransactions
+    .filter((item) => item.type === TransactionType.SAIDA)
+    .reduce((sum, item) => sum + convertCurrency(parseFloat(item.amount), item.moeda, displayCurrency), 0);
+
+  const essentialExpenses = monthlyTransactions
+    .filter(
+      (item) =>
+        item.type === TransactionType.SAIDA &&
+        needsKeywords.some((keyword) => item.description.toLowerCase().includes(keyword))
+    )
+    .reduce((sum, item) => sum + convertCurrency(parseFloat(item.amount), item.moeda, displayCurrency), 0);
+
+  const savingsRate = monthlyIncome > 0 ? ((monthlyIncome - monthlyOutcome) / monthlyIncome) * 100 : 0;
+
   return (
     <div className="min-h-screen bg-gray-50">
       <div className="container mx-auto p-4 max-w-xl">
@@ -178,6 +201,30 @@ export default function Home() {
 
         {/* Balance Card */}
         {balancecard()}
+
+        <section className="bg-white rounded-lg shadow-md p-4 sm:p-6 mb-6">
+          <h2 className="text-lg font-semibold text-gray-800 mb-3">Sessão Estratégica (Mundo Real)</h2>
+          <p className="text-sm text-gray-600 mb-4">
+            Esta visão separa o que é essencial, mede sua taxa de poupança e ajuda a tomar decisões financeiras práticas.
+          </p>
+          <div className="grid sm:grid-cols-3 gap-3 text-sm">
+            <div className="bg-blue-50 rounded p-3">
+              <div className="text-gray-500">Entradas do mês</div>
+              <div className="font-semibold text-blue-700">{formatCurrency(monthlyIncome, displayCurrency)}</div>
+            </div>
+            <div className="bg-red-50 rounded p-3">
+              <div className="text-gray-500">Saídas essenciais</div>
+              <div className="font-semibold text-red-700">{formatCurrency(essentialExpenses, displayCurrency)}</div>
+            </div>
+            <div className="bg-green-50 rounded p-3">
+              <div className="text-gray-500">Taxa de poupança</div>
+              <div className="font-semibold text-green-700">{savingsRate.toFixed(1)}%</div>
+            </div>
+          </div>
+          <p className="mt-3 text-xs text-gray-500">
+            Dica: tente manter ao menos 20% de poupança mensal e reduzir despesas não essenciais quando ficar abaixo disso.
+          </p>
+        </section>
        
 
         {/* Transaction Form Button */}
@@ -217,7 +264,7 @@ export default function Home() {
                   >
                     <option value={CurrencyType.USD}>Dólar (USD)</option>
                     <option value={CurrencyType.AOA}>Kwanza (AOA)</option>
-                    <option value={CurrencyType.USD}>Euro (EUR)</option>
+                    <option value={CurrencyType.EUR}>Euro (EUR)</option>
                   </select>
                 </div>
               </div>
