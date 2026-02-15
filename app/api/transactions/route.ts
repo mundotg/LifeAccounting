@@ -1,3 +1,4 @@
+import { getSessionUser } from "@/lib/auth";
 import prisma from "@/prisma/prisma";
 import { CurrencyType, TransactionType } from "@prisma/client";
 import { NextRequest, NextResponse } from "next/server";
@@ -21,24 +22,22 @@ const transactionSchema = z.object({
   }),
 });
 
-// 🚀 Handler para GET: Retorna todas as transações
-export async function GET() {
+// 🚀 Handler para GET: Retorna apenas as transações do utilizador autenticado
+export async function GET(req: NextRequest) {
   try {
-    console.log("🔍 Buscando todas as transações...");
-    const transactions = await prisma.transaction.findMany();
-    console.log("📄 Transações encontradas:", transactions);
+    const user = await getSessionUser(req);
 
-    if (!transactions.length) {
-      console.log("⚠️ Nenhuma transação encontrada.");
-      return NextResponse.json(
-        { message: "Nenhuma transação encontrada." },
-        { status: 204 }
-      );
+    if (!user) {
+      return NextResponse.json({ error: "Não autenticado" }, { status: 401 });
     }
+
+    const transactions = await prisma.transaction.findMany({
+      where: { userId: user.id },
+      orderBy: { createdAt: "desc" },
+    });
 
     return NextResponse.json({ data: transactions }, { status: 200 });
   } catch (error) {
-    console.error("🚨 Erro ao buscar transações:", error);
     return NextResponse.json(
       {
         error: "Erro ao buscar transações",
@@ -49,20 +48,24 @@ export async function GET() {
   }
 }
 
-// 🚀 Handler para POST: Cria uma nova transação
+// 🚀 Handler para POST: Cria uma nova transação ligada ao utilizador autenticado
 export async function POST(req: NextRequest) {
   try {
+    const user = await getSessionUser(req);
+
+    if (!user) {
+      return NextResponse.json({ error: "Não autenticado" }, { status: 401 });
+    }
+
     const body = await req.json();
-    console.log("📨 Dados recebidos:", body);
     body.amount = parseFloat(body.amount);
 
     const validatedData = transactionSchema.safeParse({
       ...body,
-      type: body.type.toUpperCase(),
+      type: body.type?.toUpperCase(),
     });
 
     if (!validatedData.success) {
-      console.error("❌ Dados inválidos:", validatedData.error.errors);
       return NextResponse.json(
         { error: "Dados inválidos", details: validatedData.error.format() },
         { status: 400 }
@@ -75,14 +78,13 @@ export async function POST(req: NextRequest) {
         amount: validatedData.data.amount,
         description: validatedData.data.description,
         moeda: validatedData.data.moeda as CurrencyType,
+        userId: user.id,
         createdAt: new Date(),
       },
     });
 
-    console.log("✅ Transação criada:", transaction);
     return NextResponse.json({ transaction }, { status: 201 });
   } catch (error) {
-    console.error("🚨 Erro ao criar transação:", error);
     return NextResponse.json(
       {
         error: "Erro ao criar transação",

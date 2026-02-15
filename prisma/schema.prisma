@@ -10,13 +10,36 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+model User {
+  id           Int           @id @default(autoincrement())
+  name         String
+  sessions     Session[]
+  transactions Transaction[]
+  createdAt    DateTime      @default(now())
+}
+
+model Session {
+  id        Int      @id @default(autoincrement())
+  token     String   @unique
+  userId    Int
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+  expiresAt DateTime
+
+  @@index([userId])
+}
+
 model Transaction {
-  id          Int      @id @default(autoincrement())
+  id          Int             @id @default(autoincrement())
   type        TransactionType
-  amount      Decimal  // Usar Decimal para evitar problemas com precisão em valores financeiros
+  amount      Decimal // Usar Decimal para evitar problemas com precisão em valores financeiros
   description String
   moeda       CurrencyType
-  createdAt   DateTime @default(now())
+  userId      Int?
+  user        User?           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt   DateTime        @default(now())
+
+  @@index([userId, createdAt])
 }
 
 // 🔹 Enum para garantir que 'type' tenha apenas valores válidos
