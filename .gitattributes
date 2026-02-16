@@ -1,0 +1,2 @@
+prisma/dev.db binary -text merge=ours
+prisma/*.db binary -text merge=ours
