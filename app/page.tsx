@@ -1,9 +1,15 @@
 "use client";
-import { useState, useEffect, useCallback, useMemo } from "react";
+
+import { useCallback, useEffect, useMemo, useState } from "react";
 import axios from "axios";
 import { CurrencyType, TransactionType } from "@prisma/client";
 import { AuthUser, ExchangeRates, TransactionT } from "@/type";
 import { TransactionModal } from "@/component/modalVisualizar";
+import { Locale, t } from "@/lib/i18n";
+import { LanguageSelector } from "@/component/home/LanguageSelector";
+import { AuthForm } from "@/component/home/AuthForm";
+import { TransactionForm } from "@/component/home/TransactionForm";
+import { TransactionsPanel } from "@/component/home/TransactionsPanel";
 
 interface FormState {
   type: TransactionType;
@@ -14,14 +20,8 @@ interface FormState {
 
 type TimeWindow = "7d" | "30d" | "month";
 
-const quickActions: Array<{ label: string; type: TransactionType; description: string }> = [
-  { label: "+ Salário", type: TransactionType.ENTRADA, description: "Salário" },
-  { label: "- Aluguel", type: TransactionType.SAIDA, description: "Aluguel" },
-  { label: "- Alimentação", type: TransactionType.SAIDA, description: "Comida" },
-  { label: "- Transporte", type: TransactionType.SAIDA, description: "Transporte" },
-];
-
 export default function Home() {
+  const [locale, setLocale] = useState<Locale>("pt");
   const [transactions, setTransactions] = useState<TransactionT[]>([]);
   const [balance, setBalance] = useState<{ [key: string]: number }>({ USD: 0, AOA: 0, EUR: 0 });
   const [form, setForm] = useState<FormState>({
@@ -46,29 +46,31 @@ export default function Home() {
   const [savingsGoal, setSavingsGoal] = useState("20");
   const [search, setSearch] = useState("");
 
-  const needsKeywords = [
-    "renda",
-    "salario",
-    "salário",
-    "aluguel",
-    "agua",
-    "água",
-    "energia",
-    "internet",
-    "saude",
-    "saúde",
-    "comida",
-    "transporte",
-    "escola",
-    "farmacia",
-    "farmácia",
-  ];
+  const needsKeywords = ["renda", "salario", "salário", "aluguel", "agua", "água", "energia", "internet", "saude", "saúde", "comida", "transporte", "escola", "farmacia", "farmácia"];
 
   const exchangeRates: ExchangeRates = {
     USD: { AOA: 830, EUR: 0.92 },
     AOA: { USD: 0.0012, EUR: 0.0011 },
     EUR: { USD: 1.09, AOA: 900 },
   };
+
+  const quickActions = [
+    { label: `+ ${t(locale, "salary")}`, type: TransactionType.ENTRADA, description: t(locale, "salary") },
+    { label: `- ${t(locale, "rent")}`, type: TransactionType.SAIDA, description: t(locale, "rent") },
+    { label: `- ${t(locale, "food")}`, type: TransactionType.SAIDA, description: t(locale, "food") },
+    { label: `- ${t(locale, "transport")}`, type: TransactionType.SAIDA, description: t(locale, "transport") },
+  ];
+
+  useEffect(() => {
+    const savedLocale = window.localStorage.getItem("locale");
+    if (savedLocale === "pt" || savedLocale === "en" || savedLocale === "zh") {
+      setLocale(savedLocale);
+    }
+  }, []);
+
+  useEffect(() => {
+    window.localStorage.setItem("locale", locale);
+  }, [locale]);
 
   const checkSession = useCallback(async () => {
     setAuthLoading(true);
@@ -107,8 +109,7 @@ export default function Home() {
 
     try {
       const { data } = await axios.get("/api/transactions");
-      const datatipo = (data.data ?? []) as TransactionT[];
-      setTransactions(datatipo);
+      setTransactions((data.data ?? []) as TransactionT[]);
     } catch {
       setTransactions([]);
     } finally {
@@ -144,9 +145,9 @@ export default function Home() {
       await checkSession();
     } catch (error) {
       if (axios.isAxiosError(error)) {
-        setAuthError(error.response?.data?.error ?? "Não foi possível autenticar.");
+        setAuthError(error.response?.data?.error ?? t(locale, "authFallbackError"));
       } else {
-        setAuthError("Não foi possível autenticar.");
+        setAuthError(t(locale, "authFallbackError"));
       }
       console.error("Erro ao iniciar sessão", error);
     }
@@ -188,28 +189,15 @@ export default function Home() {
   };
 
   const getTotalBalanceInCurrency = (currency: CurrencyType): number => {
-    return Object.entries(balance).reduce((total, [curr, value]) => {
-      return total + convertCurrency(value, curr, currency);
-    }, 0);
+    return Object.entries(balance).reduce((total, [curr, value]) => total + convertCurrency(value, curr, currency), 0);
   };
 
-  const openTransactionModal = (transaction: TransactionT) => {
-    setSelectedTransaction(transaction);
-    setIsModalOpen(true);
-  };
-
-  const closeModal = () => {
-    setIsModalOpen(false);
-    setSelectedTransaction(null);
-  };
-
-  const formatCurrency = (value: number, currency: string): string => {
-    const formatter = new Intl.NumberFormat(undefined, {
+  const formatCurrency = (value: number, currency: CurrencyType): string => {
+    return new Intl.NumberFormat(locale, {
       style: "currency",
       currency,
       minimumFractionDigits: 2,
-    });
-    return formatter.format(value);
+    }).format(value);
   };
 
   const monthlyTransactions = useMemo(
@@ -247,110 +235,59 @@ export default function Home() {
     .reduce((sum, item) => sum + convertCurrency(parseFloat(item.amount), item.moeda, displayCurrency), 0);
 
   const essentialExpenses = monthlyTransactions
-    .filter(
-      (item) =>
-        item.type === TransactionType.SAIDA &&
-        needsKeywords.some((keyword) => item.description.toLowerCase().includes(keyword))
-    )
+    .filter((item) => item.type === TransactionType.SAIDA && needsKeywords.some((keyword) => item.description.toLowerCase().includes(keyword)))
     .reduce((sum, item) => sum + convertCurrency(parseFloat(item.amount), item.moeda, displayCurrency), 0);
 
   const savingsRate = monthlyIncome > 0 ? ((monthlyIncome - monthlyOutcome) / monthlyIncome) * 100 : 0;
   const savingsGoalValue = Number(savingsGoal) || 0;
 
-  const getBadgeColor = (type: TransactionType) => {
-    return type === TransactionType.ENTRADA ? "bg-green-500 text-white" : "bg-red-500 text-white";
-  };
-
   if (authLoading) {
-    return <div className="min-h-screen bg-gray-50 flex items-center justify-center">Carregando sessão...</div>;
+    return <div className="min-h-screen bg-gray-50 flex items-center justify-center">{t(locale, "loadingSession")}</div>;
   }
 
   if (!user) {
     return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4">
-        <div className="bg-white rounded-lg shadow-md p-6 w-full max-w-md">
-          <h1 className="text-xl font-bold text-gray-800 mb-3">Acesso privado</h1>
-          <p className="text-sm text-gray-600 mb-4">
-            Cada utilizador só vê as próprias transações. Inicia a sessão para ver os teus dados.
-          </p>
-          <div className="flex gap-2 mb-3">
-            <button
-              type="button"
-              onClick={() => {
-                setAuthMode("login");
-                setAuthError("");
-              }}
-              className={`px-3 py-1 rounded text-sm ${authMode === "login" ? "bg-blue-500 text-white" : "bg-gray-100"}`}
-            >
-              Entrar
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                setAuthMode("register");
-                setAuthError("");
-              }}
-              className={`px-3 py-1 rounded text-sm ${authMode === "register" ? "bg-blue-500 text-white" : "bg-gray-100"}`}
-            >
-              Criar conta
-            </button>
-          </div>
-          <form onSubmit={handleLogin} className="flex flex-col gap-2">
-            {authMode === "register" && (
-              <input
-                type="text"
-                value={loginName}
-                onChange={(e) => setLoginName(e.target.value)}
-                className="border p-2 rounded w-full"
-                placeholder="Seu nome"
-                required
-                minLength={2}
-              />
-            )}
-            <input
-              type="email"
-              value={loginEmail}
-              onChange={(e) => setLoginEmail(e.target.value)}
-              className="border p-2 rounded w-full"
-              placeholder="Email"
-              required
-            />
-            <input
-              type="password"
-              value={loginPassword}
-              onChange={(e) => setLoginPassword(e.target.value)}
-              className="border p-2 rounded w-full"
-              placeholder="Senha"
-              required
-              minLength={6}
-            />
-            {authError && <p className="text-sm text-red-600">{authError}</p>}
-            <button type="submit" className="bg-blue-500 text-white px-4 py-2 rounded hover:bg-blue-600">
-              {authMode === "login" ? "Entrar" : "Criar conta"}
-            </button>
-          </form>
+      <div>
+        <div className="absolute top-4 right-4">
+          <LanguageSelector locale={locale} onChange={setLocale} />
         </div>
+        <AuthForm
+          locale={locale}
+          authMode={authMode}
+          setAuthMode={setAuthMode}
+          loginName={loginName}
+          setLoginName={setLoginName}
+          loginEmail={loginEmail}
+          setLoginEmail={setLoginEmail}
+          loginPassword={loginPassword}
+          setLoginPassword={setLoginPassword}
+          authError={authError}
+          onSubmit={handleLogin}
+        />
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-gray-50">
-      <div className="container mx-auto p-4 max-w-xl">
-        <header className="bg-white rounded-lg shadow-md p-4 mb-4">
-          <div className="flex items-center justify-between gap-3">
-            <h1 className="text-2xl font-bold text-gray-800">Controle Financeiro</h1>
-            <button onClick={handleLogout} className="text-sm bg-gray-200 px-3 py-1 rounded hover:bg-gray-300">
-              Sair ({user.name})
-            </button>
+    <div className="min-h-screen bg-gradient-to-b from-slate-50 to-slate-100">
+      <div className="container mx-auto p-4 max-w-3xl">
+        <header className="bg-white rounded-2xl shadow-md p-4 mb-4 border border-slate-100">
+          <div className="flex items-center justify-between gap-3 flex-wrap">
+            <h1 className="text-2xl font-bold text-gray-800">{t(locale, "appTitle")}</h1>
+            <div className="flex items-center gap-2">
+              <LanguageSelector locale={locale} onChange={setLocale} />
+              <button onClick={handleLogout} className="text-sm bg-gray-200 px-3 py-1 rounded hover:bg-gray-300">
+                {t(locale, "logout")} ({user.name})
+              </button>
+            </div>
           </div>
         </header>
 
-        <div className="bg-white rounded-lg shadow-md p-4 sm:p-6 mb-6">
+        <section className="bg-white rounded-2xl shadow-md p-4 sm:p-6 mb-6 border border-slate-100">
           <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-4 gap-2">
-            <h2 className="text-lg font-semibold text-gray-800">Saldo Total:</h2>
+            <h2 className="text-lg font-semibold text-gray-800">{t(locale, "totalBalance")}:</h2>
             <div className="flex items-center gap-2 w-full sm:w-auto">
-              <span className="text-sm text-gray-500 mr-1 hidden sm:inline">Mostrar em:</span>
+              <span className="text-sm text-gray-500 mr-1 hidden sm:inline">{t(locale, "showIn")}:</span>
               <select
                 value={displayCurrency}
                 onChange={(e) => setDisplayCurrency(e.target.value as CurrencyType)}
@@ -362,16 +299,14 @@ export default function Home() {
               </select>
             </div>
           </div>
-          <div className="text-xl sm:text-2xl font-bold text-center mb-4">
-            {formatCurrency(getTotalBalanceInCurrency(displayCurrency), displayCurrency)}
-          </div>
-        </div>
+          <div className="text-3xl font-bold text-center mb-1">{formatCurrency(getTotalBalanceInCurrency(displayCurrency), displayCurrency)}</div>
+        </section>
 
-        <section className="bg-white rounded-lg shadow-md p-4 sm:p-6 mb-6">
-          <h2 className="text-lg font-semibold text-gray-800 mb-3">Sessão Estratégica (Mundo Real)</h2>
+        <section className="bg-white rounded-2xl shadow-md p-4 sm:p-6 mb-6 border border-slate-100">
+          <h2 className="text-lg font-semibold text-gray-800 mb-3">{t(locale, "strategyTitle")}</h2>
           <div className="flex flex-col sm:flex-row sm:items-end gap-3 mb-4">
             <div>
-              <label className="text-xs text-gray-500 block">Meta de poupança (%)</label>
+              <label className="text-xs text-gray-500 block">{t(locale, "savingsGoal")}</label>
               <input
                 type="number"
                 min="0"
@@ -382,29 +317,27 @@ export default function Home() {
               />
             </div>
             <div className="text-xs text-gray-600 bg-gray-100 rounded px-3 py-2">
-              {savingsRate >= savingsGoalValue
-                ? "✅ Você está acima da meta deste mês."
-                : "⚠️ Você está abaixo da meta. Corte gastos variáveis para recuperar."}
+              {savingsRate >= savingsGoalValue ? t(locale, "goalAbove") : t(locale, "goalBelow")}
             </div>
           </div>
           <div className="grid sm:grid-cols-3 gap-3 text-sm">
             <div className="bg-blue-50 rounded p-3">
-              <div className="text-gray-500">Entradas do mês</div>
+              <div className="text-gray-500">{t(locale, "monthlyIncome")}</div>
               <div className="font-semibold text-blue-700">{formatCurrency(monthlyIncome, displayCurrency)}</div>
             </div>
             <div className="bg-red-50 rounded p-3">
-              <div className="text-gray-500">Saídas essenciais</div>
+              <div className="text-gray-500">{t(locale, "essentialExpenses")}</div>
               <div className="font-semibold text-red-700">{formatCurrency(essentialExpenses, displayCurrency)}</div>
             </div>
             <div className="bg-green-50 rounded p-3">
-              <div className="text-gray-500">Taxa de poupança</div>
+              <div className="text-gray-500">{t(locale, "savingsRate")}</div>
               <div className="font-semibold text-green-700">{savingsRate.toFixed(1)}%</div>
             </div>
           </div>
         </section>
 
-        <section className="bg-white rounded-lg shadow-md p-4 mb-4">
-          <h3 className="font-semibold text-gray-800 mb-2">Ações rápidas do dia a dia</h3>
+        <section className="bg-white rounded-2xl shadow-md p-4 mb-4 border border-slate-100">
+          <h3 className="font-semibold text-gray-800 mb-2">{t(locale, "quickActions")}</h3>
           <div className="flex flex-wrap gap-2">
             {quickActions.map((action) => (
               <button
@@ -427,131 +360,37 @@ export default function Home() {
             onClick={() => setShowForm(!showForm)}
             className="bg-blue-500 text-white py-2 px-4 rounded-full shadow-md hover:bg-blue-600 transition-colors flex items-center"
           >
-            <span className="mr-2">{showForm ? "Cancelar" : "Nova Transação"}</span>
+            <span className="mr-2">{showForm ? t(locale, "cancel") : t(locale, "newTransaction")}</span>
             <span>{showForm ? "✕" : "+"}</span>
           </button>
         </div>
 
-        {showForm && (
-          <div className="bg-white rounded-lg shadow-md p-4 mb-6">
-            <h2 className="text-center font-semibold mb-4">Adicionar Transação</h2>
-            <form onSubmit={handleSubmit} className="flex flex-col gap-3">
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Tipo</label>
-                  <select
-                    value={form.type}
-                    onChange={(e) => setForm({ ...form, type: e.target.value as TransactionType })}
-                    className="border p-2 rounded w-full"
-                  >
-                    <option value={TransactionType.ENTRADA}>Entrada</option>
-                    <option value={TransactionType.SAIDA}>Saída</option>
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Moeda</label>
-                  <select
-                    value={form.moeda}
-                    onChange={(e) => setForm({ ...form, moeda: e.target.value as CurrencyType })}
-                    className="border p-2 rounded w-full"
-                  >
-                    <option value={CurrencyType.USD}>Dólar (USD)</option>
-                    <option value={CurrencyType.AOA}>Kwanza (AOA)</option>
-                    <option value={CurrencyType.EUR}>Euro (EUR)</option>
-                  </select>
-                </div>
-              </div>
+        <TransactionForm locale={locale} showForm={showForm} form={form} setForm={setForm} onSubmit={handleSubmit} />
 
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Valor</label>
-                <input
-                  type="number"
-                  value={form.amount}
-                  onChange={(e) => setForm({ ...form, amount: e.target.value })}
-                  placeholder="0.00"
-                  className="border p-2 rounded w-full"
-                />
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Descrição</label>
-                <input
-                  type="text"
-                  value={form.description}
-                  onChange={(e) => setForm({ ...form, description: e.target.value })}
-                  placeholder="Ex: Pagamento de salário"
-                  className="border p-2 rounded w-full"
-                />
-              </div>
-
-              <button type="submit" className="bg-blue-500 text-white p-2 rounded hover:bg-blue-600 mt-2">
-                Salvar Transação
-              </button>
-            </form>
-          </div>
-        )}
-
-        <div className="bg-white rounded-lg shadow-md p-4">
-          <div className="flex flex-col sm:flex-row sm:items-center gap-2 mb-4">
-            <h2 className="text-lg font-semibold">Transações</h2>
-            <select
-              value={timeWindow}
-              onChange={(e) => setTimeWindow(e.target.value as TimeWindow)}
-              className="border p-1 rounded text-sm"
-            >
-              <option value="7d">Últimos 7 dias</option>
-              <option value="30d">Últimos 30 dias</option>
-              <option value="month">Mês atual</option>
-            </select>
-            <input
-              type="text"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder="Buscar descrição"
-              className="border p-1 rounded text-sm sm:ml-auto"
-            />
-          </div>
-
-          {isLoading ? (
-            <div className="text-center py-4">Carregando...</div>
-          ) : filteredTransactions.length === 0 ? (
-            <div className="text-center py-4 text-gray-500">Nenhuma transação encontrada nesse filtro.</div>
-          ) : (
-            <ul className="space-y-3">
-              {filteredTransactions.map((t) => (
-                <li
-                  key={t.id}
-                  onClick={() => openTransactionModal(t)}
-                  className="p-3 rounded-lg border border-gray-200 hover:bg-gray-50 cursor-pointer transition-colors"
-                >
-                  <div className="flex flex-col sm:flex-row justify-between sm:items-start gap-2">
-                    <div className="flex-1 min-w-0">
-                      <div className="font-semibold truncate">{t.description}</div>
-                      <div className="text-sm text-gray-500 flex items-center gap-2">
-                        <span>{new Date(t.createdAt).toLocaleDateString()}</span>
-                        <span className={`px-2 py-0.5 rounded-full text-xs ${getBadgeColor(t.type)} inline-block sm:hidden`}>
-                          {t.type}
-                        </span>
-                      </div>
-                    </div>
-                    <div className="text-right flex items-center justify-between sm:block w-full sm:w-auto">
-                      <div className="font-bold whitespace-nowrap">
-                        {t.type === TransactionType.SAIDA ? "-" : "+"}
-                        {formatCurrency(parseFloat(t.amount), t.moeda)}
-                      </div>
-                    </div>
-                  </div>
-                </li>
-              ))}
-            </ul>
-          )}
-        </div>
+        <TransactionsPanel
+          locale={locale}
+          isLoading={isLoading}
+          filteredTransactions={filteredTransactions}
+          timeWindow={timeWindow}
+          setTimeWindow={setTimeWindow}
+          search={search}
+          setSearch={setSearch}
+          onOpenTransaction={(transaction) => {
+            setSelectedTransaction(transaction);
+            setIsModalOpen(true);
+          }}
+          formatCurrency={formatCurrency}
+        />
 
         <TransactionModal
           transaction={selectedTransaction}
           isOpen={isModalOpen}
-          onClose={closeModal}
+          onClose={() => {
+            setIsModalOpen(false);
+            setSelectedTransaction(null);
+          }}
           exchangeRates={exchangeRates}
+          locale={locale}
         />
       </div>
     </div>
