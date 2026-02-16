@@ -36,7 +36,11 @@ export default function Home() {
   const [selectedTransaction, setSelectedTransaction] = useState<TransactionT | null>(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [user, setUser] = useState<AuthUser | null>(null);
+  const [authMode, setAuthMode] = useState<"login" | "register">("login");
   const [loginName, setLoginName] = useState("");
+  const [loginEmail, setLoginEmail] = useState("");
+  const [loginPassword, setLoginPassword] = useState("");
+  const [authError, setAuthError] = useState("");
   const [authLoading, setAuthLoading] = useState(true);
   const [timeWindow, setTimeWindow] = useState<TimeWindow>("30d");
   const [savingsGoal, setSavingsGoal] = useState("20");
@@ -126,11 +130,24 @@ export default function Home() {
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
+    setAuthError("");
     try {
-      await axios.post("/api/session", { name: loginName });
+      await axios.post("/api/session", {
+        mode: authMode,
+        name: loginName,
+        email: loginEmail,
+        password: loginPassword,
+      });
       setLoginName("");
+      setLoginEmail("");
+      setLoginPassword("");
       await checkSession();
     } catch (error) {
+      if (axios.isAxiosError(error)) {
+        setAuthError(error.response?.data?.error ?? "Não foi possível autenticar.");
+      } else {
+        setAuthError("Não foi possível autenticar.");
+      }
       console.error("Erro ao iniciar sessão", error);
     }
   };
@@ -256,18 +273,60 @@ export default function Home() {
           <p className="text-sm text-gray-600 mb-4">
             Cada utilizador só vê as próprias transações. Inicia a sessão para ver os teus dados.
           </p>
-          <form onSubmit={handleLogin} className="flex gap-2">
-            <input
-              type="text"
-              value={loginName}
-              onChange={(e) => setLoginName(e.target.value)}
-              className="border p-2 rounded w-full"
-              placeholder="Seu nome"
-              required
-              minLength={2}
-            />
-            <button type="submit" className="bg-blue-500 text-white px-4 rounded hover:bg-blue-600">
+          <div className="flex gap-2 mb-3">
+            <button
+              type="button"
+              onClick={() => {
+                setAuthMode("login");
+                setAuthError("");
+              }}
+              className={`px-3 py-1 rounded text-sm ${authMode === "login" ? "bg-blue-500 text-white" : "bg-gray-100"}`}
+            >
               Entrar
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setAuthMode("register");
+                setAuthError("");
+              }}
+              className={`px-3 py-1 rounded text-sm ${authMode === "register" ? "bg-blue-500 text-white" : "bg-gray-100"}`}
+            >
+              Criar conta
+            </button>
+          </div>
+          <form onSubmit={handleLogin} className="flex flex-col gap-2">
+            {authMode === "register" && (
+              <input
+                type="text"
+                value={loginName}
+                onChange={(e) => setLoginName(e.target.value)}
+                className="border p-2 rounded w-full"
+                placeholder="Seu nome"
+                required
+                minLength={2}
+              />
+            )}
+            <input
+              type="email"
+              value={loginEmail}
+              onChange={(e) => setLoginEmail(e.target.value)}
+              className="border p-2 rounded w-full"
+              placeholder="Email"
+              required
+            />
+            <input
+              type="password"
+              value={loginPassword}
+              onChange={(e) => setLoginPassword(e.target.value)}
+              className="border p-2 rounded w-full"
+              placeholder="Senha"
+              required
+              minLength={6}
+            />
+            {authError && <p className="text-sm text-red-600">{authError}</p>}
+            <button type="submit" className="bg-blue-500 text-white px-4 py-2 rounded hover:bg-blue-600">
+              {authMode === "login" ? "Entrar" : "Criar conta"}
             </button>
           </form>
         </div>

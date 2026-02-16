@@ -33,3 +33,8 @@ tsconfig.tsbuildinfo
 
 # Uploads ou arquivos gerados
 public/uploads/
+# Banco local do Prisma (evita conflitos binários no repositório)
+prisma/dev.db
+prisma/dev.db-journal
+prisma/*.db-wal
+prisma/*.db-shm
